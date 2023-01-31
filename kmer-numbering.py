@@ -564,9 +564,9 @@ class Eta:
 		self._last_v = -1
 		self._total  = total
 
-		self.now           = -1
-		self.delta_t_start = -1
-		self.delta_t_last  = -1
+		self.now           = datetime.datetime.now()
+		self.delta_t_start = datetime.timedelta(seconds=-1)
+		self.delta_t_last  = datetime.timedelta(seconds=-1)
 		self.diff_v_start  = -1
 		self.diff_v_last   = -1
 		self.speed_start   = -1
@@ -642,11 +642,12 @@ def create(kmer, debug=False):
 		if kmer_size<7:
 			ids[cdx] = ids.get(cdx, []) + [i]
 
+		if i % (100_000 if (4**kmer_size) > 100_000 else 1) == 0:
+			print(f" {eta} | {num_regs=:15,d}")
+			eta.update(i)
+
 		if cdx >= i:
 			num_regs += 1
-			if i % (100_000 if (4**kmer_size) > 100_000 else 1) == 0:
-				eta.update(i)
-				print(f" {i=:15,d} / {4**kmer_size:15,d} | {num_regs=:15,d} | {eta}")
 			kmer.pack_w(cdx)
 
 	print(f"{num_regs=:15,d}")
