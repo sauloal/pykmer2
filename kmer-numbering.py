@@ -1,52 +1,100 @@
 #!/usr/bin/env python3
 
+#https://github.com/sauloal/pykmer2
+
 import os
 import sys
 import math
+import datetime
 import struct
 import functools
 
 """
+1
 4.0K idx_03
 4.0K idx_03.xz
 
+2
 4.0K idx_05
 4.0K idx_05.xz
 
+2
  12K idx_07
 8.0K idx_07.xz
 
+4
 260K idx_09
  28K idx_09.xz
 
+4
 4.1M idx_11
 284K idx_11.xz
 
+4
  65M idx_13
 4.1M idx_13.xz
 
+4
 1.1G idx_15
  61M idx_15.xz
+
+8
+idx_17
 """
 
 """
 time pypy3 kmer-numbering.py 11
- num_regs=   1,049,600
- i       =   4,100,000
+ 4**11    =      4,194,304
+ 4**11/4  =      1,048,576
+ 4**11/4*4=      4,194,304b 4,09Kkb 4Mb
+ num_regs =      1,049,600
+ i        =      4,100,000
 real    2m19.662s
 user    2m18.588s
 sys     0m 1.031s
 
 time pypy3 kmer-numbering.py 15
- num_regs= 268,451,840
+ 4**15    =   1,073,741,824
+ 4**15/4  =     268,435,456
+ 4**15/4*4=   1,073,741,824b 1,048,576Kb 1,024Mb 1Gb
+ num_regs =     268,451,840
+ i        =   1,073,700,000
+real    1703m 3.469s
+user    1575m32.661s
+sys       66m47.063s
+
+time pypy3 kmer-numbering.py 17
+ 4**17    = 17,179,869,184
+ 4**17/4  =  4,294,967,296
+ 4**17/4*8= 34,359,738,368b 33,554,432Kb 32,768Mb 32Gb
+ num_regs = 
+
+time pypy3 kmer-numbering.py 19
+ 4**19    = 274,877,906,944
+ 4**19/4  =  68,719,476,736
+ 4**19/4*8= 549,755,813,888b 536870912Kb 524,288Mb 512Gb
+ num_regs = 
+ i        = 
+
+time pypy3 kmer-numbering.py 21
+ 4**21    = 
+ 4**21/4  = 
+ 4**21/4*8= 8,589,934,592Kb 8,388,608Mb 8,192Gb 8Tb
+ num_regs = 
+ i        = 
+
 
 """
 
 VOCAB = ['A','C','G','T']
-RC    = {'A':'T','C':'G','G':'C','T':'A'}
+RCD   = {'A':'T','C':'G','G':'C','T':'A'}
+RC    = [RCD.get(chr(c), None) for c in range(254)]
 
-BACOV = { c:i for i,c in enumerate(VOCAB) }
-MULTS = tuple(i      for i in range(32,-2,-2))
+
+BACOVD = {     c:i for i,c in enumerate(VOCAB) }
+BACOV  = [BACOVD.get(chr(c), None) for c in range(254)]
+
+MULTS = tuple(i   for i   in range(32,-2,-2))
 STLUM = tuple(reversed(MULTS))
 #print("MULTS", MULTS)
 
@@ -90,7 +138,7 @@ def generate_kmer(length, pos=0, prev=None):
 			#print(" p", p)
 			yield p
 
-@functools.lru_cache(maxsize=None)
+#@functools.lru_cache(maxsize=None)
 def get_mask(kmer_size):
 	masks = [3 << ((kmer_size-k-1)*2) for k in range(kmer_size)]
 	return masks
@@ -113,26 +161,48 @@ def generate_sequence(kmer_size, value):
 def index_kmer(seq):
 	lseq     = len(seq)
 	mults    = STLUM[:lseq]
-	values   = [BACOV[c] for c in seq]
-	calcs    = [v<<mults[lseq-i-1] for i,v in enumerate(values)]
+	muls     = tuple(mults[lseq-i-1] for i in range(lseq))
+
+	values   = (BACOV[c]    for c   in seq)
+	calcs    = (v<<muls[i]  for i,v in enumerate(values))
 	calc_sum = sum(calcs)
 	#print("  ", seq, values, calcs, calc_sum)
 	return calc_sum
 
-@functools.lru_cache(maxsize=1_000_000)
+def get_kmer_indexer(lseq):
+	mults    = STLUM[:lseq]
+	muls     = tuple(mults[lseq-i-1] for i in range(lseq))
+
+	#@functools.lru_cache(maxsize=1_000_000)
+	def kmer_indexer(seq):
+		values   = (BACOV[ord(c)] for c   in seq)
+		calcs    = (v<<muls[i]    for i,v in enumerate(values))
+		calc_sum = sum(calcs)
+		#print("  ", seq, values, calcs, calc_sum)
+		return calc_sum
+
+	return kmer_indexer
+
+kmer_indexer = None
+
+#@functools.lru_cache(maxsize=1_000_000)
 def rev_comp_4(seq, debug=False):
 	fwd      = tuple(seq)
-	fwd_comp = tuple(RC[c] for c in fwd)
+	fwd_comp = tuple(RC[ord(c)] for c in fwd)
 	rev      = tuple(fwd[::-1])
 	rev_comp = tuple(fwd_comp[::-1])
 
 	#mask         = (2 << ((len(seq)-1)*2))
 	#print(f"  MASK    {mask:5d} {mask:>06b} {mask:03x}")
 
-	fwd_idx      = index_kmer(fwd)
-	fwd_comp_idx = index_kmer(fwd_comp)
-	rev_idx      = index_kmer(rev)
-	rev_comp_idx = index_kmer(rev_comp)
+	global kmer_indexer
+	if kmer_indexer is None:
+		kmer_indexer = get_kmer_indexer(len(fwd))
+
+	fwd_idx      = kmer_indexer(fwd)
+	fwd_comp_idx = kmer_indexer(fwd_comp)
+	rev_idx      = kmer_indexer(rev)
+	rev_comp_idx = kmer_indexer(rev_comp)
 
 	is_fwd  = None
 	is_comp = None
@@ -140,25 +210,25 @@ def rev_comp_4(seq, debug=False):
 	min_seq = None
 	min_idx = None
 
-	if   all(fwd_idx      <= r for r in (fwd_comp_idx, rev_idx     , rev_comp_idx)): # fwd
+	if   fwd_idx      <= fwd_comp_idx and fwd_idx      <= rev_idx      and fwd_idx      <= rev_comp_idx: # fwd
 		is_fwd  = True
 		is_comp = False
 		is_fake = False
 		min_seq = fwd
 		min_idx = fwd_idx
-	elif all(rev_comp_idx <= r for r in (fwd_idx     , fwd_comp_idx, rev_idx     )): # rev_comp
+	elif rev_comp_idx <=  fwd_idx     and rev_comp_idx <= fwd_comp_idx and rev_comp_idx <= rev_idx: # rev_comp
 		is_fwd  = False
 		is_comp = True
 		is_fake = False
 		min_seq = rev_comp
 		min_idx = rev_comp_idx
-	elif all(fwd_comp_idx <= r for r in (fwd_idx     , rev_idx     , rev_comp_idx)): # fwd_comp
+	elif fwd_comp_idx <= fwd_idx      and fwd_comp_idx <= rev_idx      and fwd_comp_idx <= rev_comp_idx: # fwd_comp
 		is_fwd  = True
 		is_comp = True
 		is_fake = True
 		min_seq = fwd_comp
 		min_idx = fwd_comp_idx
-	elif all(rev_idx      <= r for r in (fwd_idx     , fwd_comp_idx, rev_comp_idx)): # rev
+	elif rev_idx      <= fwd_idx      and rev_idx      <= fwd_comp_idx and rev_idx      <= rev_comp_idx: # rev
 		is_fwd  = False
 		is_comp = False
 		is_fake = True
@@ -173,6 +243,140 @@ def rev_comp_4(seq, debug=False):
 	if debug: print(f"  REV COMP {rev_comp=} {rev_comp_idx=:5d} {rev_comp_idx:>06b} {rev_comp_idx:03x} {'*' if not is_fwd and     is_comp else ''}")
 
 	return min_seq, min_idx, is_fwd, is_comp, is_fake
+
+def calc_index_algo(kmer_size, seq, debug=False):
+	debug     = True
+	fwd       = tuple(seq)
+	rec       = tuple(RC[c] for c in fwd[::-1])
+	fwd_idx   = index_kmer(fwd)
+	rec_idx   = index_kmer(rec)
+
+	ceq,idx   = (fwd,fwd_idx) if fwd_idx <= rec_idx else (rec,rec_idx)
+	idx_block = idx // 4
+	idx_mod   = idx %  4
+
+	if debug: print(f"    {kmer_size=} {fwd=} {fwd_idx=} {rec=} {rec_idx=} {ceq=} {idx=}")
+
+	return calc_index_algo_idx(kmer_size, idx, debug=debug)
+
+def calc_index_algo_idx(kmer_size, idx, debug=False):
+	debug               = True
+
+	idx_col             = idx // 4
+	idx_mod             = idx %  4
+
+	if debug: print(f"    {idx=} {idx_col=} {idx_mod=}")
+
+	mod_block_cols        = 4
+	mod_block_rows        = 4
+	mod_block_size        = mod_block_cols * mod_block_rows
+
+	mod_block_offset      = 2
+	mod_block_offset_cols = mod_block_offset * mod_block_cols
+
+	mod_offset_1          = idx          - mod_block_offset_cols + 1
+	mod_offset_2          = mod_offset_1 - mod_block_size        + 1
+	mod_offset_3          = mod_offset_2 - mod_block_size        + 1
+	mod_offset_4          = mod_offset_3 - mod_block_size        + 1
+
+	mod_offset_1_mod      = mod_offset_1 // 4
+	mod_offset_2_mod      = mod_offset_2 // 4
+	mod_offset_3_mod      = mod_offset_3 // 4
+	mod_offset_4_mod      = mod_offset_4 // 4
+
+	if debug: print(f"      {mod_block_cols=:2d} {mod_block_rows=:2d} {mod_block_size=:2d} {mod_block_offset=:2d}")
+	if debug: print(f"        {mod_offset_1=:5d} {mod_offset_1_mod=:5d}")
+	if debug: print(f"        {mod_offset_2=:5d} {mod_offset_2_mod=:5d}")
+	if debug: print(f"        {mod_offset_3=:5d} {mod_offset_3_mod=:5d}")
+	if debug: print(f"        {mod_offset_4=:5d} {mod_offset_4_mod=:5d}")
+
+	idx_delta = max(0,mod_offset_1_mod) + max(0,mod_offset_2_mod) + max(0,mod_offset_3_mod) + max(0,mod_offset_4_mod)
+	idx_end   = idx - max(0,idx_delta)
+	if debug: print(f"    {idx_delta=:2d} {idx_end=:2d}")
+	if debug: print()
+
+	"""
+	boundary_mod_offset_global = 2
+	boundary_mod_offset_block  = 3
+	boundary_mod_block_size    = 4
+	boundary_mod_pilar_size    = 4**(kmer_size-3)
+	boundaries                 = gen_boundaries(kmer_size)
+
+	#if debug: print(f"  {boundary_mod_offset_global=} {boundary_mod_offset_block=} {boundary_mod_block_size=} {boundary_mod_pilar_size=}")
+	#if debug: print(f"  {boundaries=}")
+
+	idx_mods = [0] * boundary_mod_block_size
+	for i in range(boundary_mod_block_size):
+		#=(idx_mod+1)*if(idx_mod>boundary_pos,1,-1)
+		if False:
+			boundary_pos         = boundary_mod_offset_global + (boundary_mod_block_size*i)
+			boundary_col         = boundary_mod_block_size - i
+			boundary_pos_valid   =  idx_block  >= boundary_pos
+			boundary_col_valid   = (idx_mod+1) == boundary_col
+			boundary_block = -1 # ((boundary_mod_offset_global + (i*4))*4) - i
+			boundary       = -1 # boundary_mod_offset_block  + boundary_block
+			diff_mod       = (idx - boundary) // 4 if idx_mod >= boundary else 0
+			idx_mods[i]    = diff_mod
+			if debug: print(f"  {i=:2d} {boundary_pos=:2d} {boundary_col=:2d} {boundary_pos_valid=:2d} {boundary_col_valid=:2d} {boundary_block=:2d} {boundary=:2d} {diff_mod=:2d}")
+
+	idx_sum = sum(idx_mods)
+	idx_end = idx - idx_sum
+
+	print(f"  {idx_sum=} {idx_end=}")
+	"""
+
+	return idx_end
+
+def gen_boundaries(kmer_size, size=4, debug=False):
+	block_size                   = 4
+	boundaries_mod_offset_global = 2
+	boundaries_mod_offset_block  = 3
+	boundaries_mod               = [ boundaries_mod_offset_block+((boundaries_mod_offset_global+(v*4))*4)-v for v in range(size) ]
+	if debug: print("  boundaries_mod", boundaries_mod)
+	return boundaries_mod
+
+def calc_index(ind, kmer_size, debug=False):
+	boundaries_mod = gen_boundaries(kmer_size, debug=debug)
+
+	if debug: print("\n ind", ind)
+	diff_mod                 = [ (ind-b+4)//4 if ind >= b else 0 for i,b in enumerate(boundaries_mod) ]
+	if debug: print("  diff_mod      ", diff_mod)
+	idx  = ind - sum(diff_mod)
+	if debug: print("  idx", idx)
+	return idx
+
+def calc_index_2(seq, idx, kmer_size, debug=False):
+	#debug = True
+
+	if debug: print()
+	if debug: print("calc_index_2", seq)
+
+	sen = [BACOV[s] for s in seq]
+	val = [0 for s in sen]
+
+	if debug: print(f"  {seq=} {idx=}")
+	if debug: print(f"  idx  {idx :12d} {idx :>06b}")
+
+	if idx < 32:
+		#first letter is always a or c
+		mask = (1 << ((kmer_size) * 2)-1)-1 # clear first bit 011111
+		val  = idx & mask
+		if debug: print(f"  mask {mask:12d} {mask:>06b}")
+		if debug: print(f"  val  {val :12d} {val :>06b}")
+	else:
+		#last char is always a or c
+
+		mask =  idx & 1 # get last bit. 0 for A, 1 for C - 000001
+		lval = (idx & mask)
+		val  = (idx >> 1) | lval # delete last bit, move to last-to-last bit, converting T to A and G to C
+		if debug: print(f"  mask {mask:12d} {mask:>06b}")
+		if debug: print(f"  lval {lval:12d} {lval:>06b}")
+		if debug: print(f"  val  {val :12d} {val :>06b}")
+
+	return val
+
+#def rev_comp(seq):
+#	return "".join([RC[c] for c in seq[::-1]])
 
 class Kmer:
 	def __init__(self, kmer_size, debug=False):
@@ -301,7 +505,7 @@ class Kmer:
 		assert self.fhd_r.tell() == self.footer_pos
 
 
-	@functools.lru_cache(maxsize=1_000_000)
+	#@functools.lru_cache(maxsize=1_000_000)
 	def get_register_at_pos(self, pos):
 		assert self.fhd_r is not None
 		assert pos < self.num_regs, f"{pos=} < {self.num_regs=}"
@@ -311,7 +515,7 @@ class Kmer:
 		val = self.struct_unpack(reg)[0]
 		return val
 
-	@functools.lru_cache(maxsize=1_000_000)
+	#@functools.lru_cache(maxsize=1_000_000)
 	def find_register_id(self, value):
 		lo = 0
 		hi = self.num_regs
@@ -329,7 +533,7 @@ class Kmer:
 			else:
 				lo = mi
 
-	@functools.lru_cache(maxsize=1_000_000)
+	#@functools.lru_cache(maxsize=1_000_000)
 	def find_sequence_id(self, seq):
 		assert self.fhd_r is not None
 		cds, cdx, is_fwd, is_comp, is_fake = rev_comp_4(seq, debug=False)
@@ -340,20 +544,81 @@ class Kmer:
 		if self.debug: print(f"  {cds} {cdx:{int(math.log10(self.struct_max))}d} {cdx:>0{self.struct_size*8}b} {is_fwd=!s:6s} {is_comp=!s:6s} {is_fake=!s:6s} {pos=:{int(math.log10(self.struct_max))}d} {val=:{int(math.log10(self.struct_max))}d}")
 		return pos, val
 
-	@functools.lru_cache(maxsize=1_000_000)
+	#@functools.lru_cache(maxsize=1_000_000)
 	def generate_sequence(self, value):
 		return generate_sequence(self.kmer_size, value)
 
-	@functools.lru_cache(maxsize=1_000_000)
+	#@functools.lru_cache(maxsize=1_000_000)
 	def rev_comp_4(self, seq):
 		return rev_comp_4(seq, debug=self.debug)
 
+def create2(kmer, debug=False):
+	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
+		calc_index_algo_idx(kmer_size, i, debug=debug)
+		#calc_index_algo(kmer.kmer_size, seq, debug=debug)
+
+class Eta:
+	def __init__(self, total=-1):
+		self._start  = datetime.datetime.now()
+		self._last_t = self._start
+		self._last_v = -1
+		self._total  = total
+
+		self.now           = -1
+		self.delta_t_start = -1
+		self.delta_t_last  = -1
+		self.diff_v_start  = -1
+		self.diff_v_last   = -1
+		self.speed_start   = -1
+		self.speed_last    = -1
+		self.eta_v         = -1
+		self.eta_t         = -1
+
+	def update(self, value):
+		self.now           = datetime.datetime.now()
+		self.delta_t_start = self.now - self._start
+		self.delta_t_last  = self.now - self._last_t
+
+		if value < self._last_v:
+			self.diff_v_last = -1
+			self.speed_last  = -1
+		else:
+			ela_last         = self.delta_t_last.total_seconds()
+			self.diff_v_last = value - self._last_v
+			self.speed_last  = self.diff_v_last / ela_last
+
+
+		if   self._total == -1:
+			self.eta_v = -1
+			self.eta_t = -1
+		else:
+			ela_start          = self.delta_t_start.total_seconds()
+			self.diff_v_start  = value
+			self.speed_start   = self.diff_v_start / ela_start
+			self.eta_v         = self._total - value
+
+			if self.speed_start == 0:
+				self.eta_t = -1
+			else:
+				etas               = self.eta_v / self.speed_start
+				self.eta_t         = datetime.timedelta(seconds=int(etas))
+
+		self._last_t = self.now
+		self._last_v = value
+
+	def __str__(self):
+		now           = self.now.isoformat(sep=" ", timespec="seconds")
+		delta_t_start = datetime.timedelta(days=self.delta_t_start.days, seconds=self.delta_t_start.seconds)
+		delta_t_last  = datetime.timedelta(days=self.delta_t_last.days , seconds=self.delta_t_last.seconds)
+		return f"{now} | {self._last_v:15,d} | Delta V :: Start/Last {self.diff_v_start:15,d}/{self.diff_v_last:15,d} | Delta T: Start/Last {str(delta_t_start):15s}/{str(delta_t_last):15s} | Speed Start/Last {int(self.speed_start):15,d}/{int(self.speed_last):15,d} | ETA {self.eta_t}/{self.eta_v:15,d}"
 
 def create(kmer, debug=False):
 	print("creating")
 
 	ids = {}
 	kmer.open_w()
+
+	eta = Eta(4**kmer_size)
 
 	num_regs = 0
 	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
@@ -371,7 +636,7 @@ def create(kmer, debug=False):
 				if debug: print(f"SEQ {i=:5d} {seq=} {ind=:5d} {ind:>06b} {inv=!s:6s} {qes=} {dni=:5d} {dni:>06b} {qes if inv else seq} {idx=:5d} {idx:>06b} {idx:03x} {cdx=:5d} {cdx:>06b} {cdx:03x} {'*' if inv else ''}")
 		else:
 			if debug: print(f"SEQ {i=:5d} {seq=}")
-			cds, cdx, is_fwd, is_comp, is_fake = kmer.rev_comp_4(seq, debug=False)
+			cds, cdx, is_fwd, is_comp, is_fake = kmer.rev_comp_4(seq)
 			if debug: print(f"  {cds} {cdx:5d} {cdx:>06b} {cdx:03x} {is_fwd=!s:6s} {is_comp=!s:6s} {is_fake=!s:6s}")
 
 		if kmer_size<7:
@@ -379,8 +644,9 @@ def create(kmer, debug=False):
 
 		if cdx >= i:
 			num_regs += 1
-			if i % 100_000 == 0:
-				print(f" {i=:15,d} / {4**kmer_size:15,d} | {num_regs=:15,d}")
+			if i % (100_000 if (4**kmer_size) > 100_000 else 1) == 0:
+				eta.update(i)
+				print(f" {i=:15,d} / {4**kmer_size:15,d} | {num_regs=:15,d} | {eta}")
 			kmer.pack_w(cdx)
 
 	print(f"{num_regs=:15,d}")
@@ -388,6 +654,10 @@ def create(kmer, debug=False):
 	kmer.close_w()
 
 	print("created")
+
+	if kmer.kmer_size < 7:
+		for i, (cdx, idxs) in enumerate(sorted(ids.items())):
+			print(f"{i:3d} {cdx:3d} {idxs}")
 
 	return num_regs, ids
 
@@ -398,9 +668,10 @@ def check(kmer, num_regs=None, debug=False):
 
 	print("checking")
 	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
-		if i % 100_000 == 0:
+		if i % (100_000 if (4**kmer_size) > 100_000 else 1) == 0:
 			print(f" {i=:15,d} / {4**kmer_size:15,d}")
 		pos, val = kmer.find_sequence_id(seq)
+		#calc_index_algo(kmer.kmer_size, seq, debug=debug)
 		#cds, cdx, is_fwd, is_comp, is_fake = kmer.rev_comp_4(seq)
 		#qes                                = kmer.generate_sequence(cdx)
 		#if debug or kmer_size<7: print(f"{i=} {seq=} {pos=} {val=} {cds=} {cdx=} {qes=}")
@@ -413,91 +684,24 @@ def main(kmer_size, debug=False):
 	kmer = Kmer(kmer_size=kmer_size, debug=kmer_size<7 or debug)
 
 	num_regs = None
+
+
+	#create2(kmer, debug=debug)
+	#sys.exit(0)
+
 	if kmer.exists:
 		print("exists")
 	else:
 		num_regs, ids = create(kmer, debug=debug)
 
-	if kmer_size < 7:
-		for i, (cdx, idxs) in enumerate(sorted(ids.items())):
-			print(f"{i:3d} {cdx:3d} {idxs}")
 
-	check(kmer, num_regs=num_regs, debug=debug)
-
+	if kmer_size < 15:
+		#check(kmer, num_regs=num_regs, debug=debug)
+		pass
+	else:
+		print("too large. not checking")
 
 if __name__ == "__main__":
 	kmer_size = int(sys.argv[1])
 	main(kmer_size=kmer_size)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def gen_boundaries(kmer_size, size=4, debug=False):
-	block_size                   = 4
-	boundaries_mod_offset_global = 2
-	boundaries_mod_offset_block  = 3
-	boundaries_mod               = [ boundaries_mod_offset_block+((boundaries_mod_offset_global+(v*4))*4)-v for v in range(size) ]
-	if debug: print("  boundaries_mod", boundaries_mod)
-	return boundaries_mod
-
-def calc_index(ind, kmer_size, debug=False):
-	boundaries_mod = gen_boundaries(kmer_size, debug=debug)
-
-	if debug: print("\n ind", ind)
-	diff_mod                 = [ (ind-b+4)//4 if ind >= b else 0 for i,b in enumerate(boundaries_mod) ]
-	if debug: print("  diff_mod      ", diff_mod)
-	idx  = ind - sum(diff_mod)
-	if debug: print("  idx", idx)
-	return idx
-
-def calc_index_2(seq, idx, kmer_size, debug=False):
-	#debug = True
-
-	if debug: print()
-	if debug: print("calc_index_2", seq)
-
-	sen = [BACOV[s] for s in seq]
-	val = [0 for s in sen]
-
-	if debug: print(f"  {seq=} {idx=}")
-	if debug: print(f"  idx  {idx :12d} {idx :>06b}")
-
-	if idx < 32:
-		#first letter is always a or c
-		mask = (1 << ((kmer_size) * 2)-1)-1 # clear first bit 011111
-		val  = idx & mask
-		if debug: print(f"  mask {mask:12d} {mask:>06b}")
-		if debug: print(f"  val  {val :12d} {val :>06b}")
-	else:
-		#last char is always a or c
-
-		mask =  idx & 1 # get last bit. 0 for A, 1 for C - 000001
-		lval = (idx & mask)
-		val  = (idx >> 1) | lval # delete last bit, move to last-to-last bit, converting T to A and G to C
-		if debug: print(f"  mask {mask:12d} {mask:>06b}")
-		if debug: print(f"  lval {lval:12d} {lval:>06b}")
-		if debug: print(f"  val  {val :12d} {val :>06b}")
-
-	return val
-
-def rev_comp(seq):
-	return "".join([RC[c] for c in seq[::-1]])
 
