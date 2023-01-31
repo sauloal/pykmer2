@@ -86,6 +86,8 @@ time pypy3 kmer-numbering.py 21
 
 """
 
+PRINT_EVERY = 100_000
+
 VOCAB = ['A','C','G','T']
 RCD   = {'A':'T','C':'G','G':'C','T':'A'}
 RC    = [RCD.get(chr(c), None) for c in range(254)]
@@ -260,10 +262,10 @@ def calc_index_algo(kmer_size, seq, debug=False):
 	return calc_index_algo_idx(kmer_size, idx, debug=debug)
 
 def calc_index_algo_idx(kmer_size, idx, debug=False):
-	debug               = True
+	debug                 = True
 
-	idx_col             = idx // 4
-	idx_mod             = idx %  4
+	idx_col               = idx // 4
+	idx_mod               = idx %  4
 
 	if debug: print(f"    {idx=} {idx_col=} {idx_mod=}")
 
@@ -552,11 +554,6 @@ class Kmer:
 	def rev_comp_4(self, seq):
 		return rev_comp_4(seq, debug=self.debug)
 
-def create2(kmer, debug=False):
-	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
-		calc_index_algo_idx(kmer_size, i, debug=debug)
-		#calc_index_algo(kmer.kmer_size, seq, debug=debug)
-
 class Eta:
 	def __init__(self, total=-1):
 		self._start  = datetime.datetime.now()
@@ -612,6 +609,12 @@ class Eta:
 		delta_t_last  = datetime.timedelta(days=self.delta_t_last.days , seconds=self.delta_t_last.seconds)
 		return f"{now} | {self._last_v:15,d} | Delta V :: Start/Last {self.diff_v_start:15,d}/{self.diff_v_last:15,d} | Delta T: Start/Last {str(delta_t_start):15s}/{str(delta_t_last):15s} | Speed Start/Last {int(self.speed_start):15,d}/{int(self.speed_last):15,d} | ETA {self.eta_t}/{self.eta_v:15,d}"
 
+
+def create2(kmer, debug=False):
+	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
+		#calc_index_algo_idx(kmer_size, i, debug=debug)
+		calc_index_algo(kmer.kmer_size, seq, debug=debug)
+
 def create(kmer, debug=False):
 	print("creating")
 
@@ -642,9 +645,9 @@ def create(kmer, debug=False):
 		if kmer_size<7:
 			ids[cdx] = ids.get(cdx, []) + [i]
 
-		if i % (100_000 if (4**kmer_size) > 100_000 else 1) == 0:
-			print(f" {eta} | {num_regs=:15,d}")
+		if i % (PRINT_EVERY if (4**kmer_size) > PRINT_EVERY else 1) == 0:
 			eta.update(i)
+			print(f" {eta} | {num_regs=:15,d}")
 
 		if cdx >= i:
 			num_regs += 1
@@ -669,7 +672,7 @@ def check(kmer, num_regs=None, debug=False):
 
 	print("checking")
 	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
-		if i % (100_000 if (4**kmer_size) > 100_000 else 1) == 0:
+		if i % (PRINT_EVERY if (4**kmer_size) > PRINT_EVERY else 1) == 0:
 			print(f" {i=:15,d} / {4**kmer_size:15,d}")
 		pos, val = kmer.find_sequence_id(seq)
 		#calc_index_algo(kmer.kmer_size, seq, debug=debug)
@@ -685,7 +688,6 @@ def main(kmer_size, debug=False):
 	kmer = Kmer(kmer_size=kmer_size, debug=kmer_size<7 or debug)
 
 	num_regs = None
-
 
 	#create2(kmer, debug=debug)
 	#sys.exit(0)
