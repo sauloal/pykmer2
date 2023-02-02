@@ -11,35 +11,37 @@ import functools
 
 """
 1
-4.0K idx_03
-4.0K idx_03.xz
+4.0K idx_4_03
+4.0K idx_4_03.xz
 
 2
-4.0K idx_05
-4.0K idx_05.xz
+4.0K idx_4_05
+4.0K idx_4_05.xz
 
 2
- 12K idx_07
-8.0K idx_07.xz
+ 12K idx_4_07
+8.0K idx_4_07.xz
 
 4
-260K idx_09
- 28K idx_09.xz
+260K idx_4_09
+ 28K idx_4_09.xz
 
 4
-4.1M idx_11
-284K idx_11.xz
+4.1M idx_4_11
+284K idx_4_11.xz
 
 4
- 65M idx_13
-4.1M idx_13.xz
+ 65M idx_4_13
+4.1M idx_4_13.xz
 
 4
-1.1G idx_15
- 61M idx_15.xz
+1.1G idx_4_15
+ 61M idx_4_15.xz
 
 8
-idx_17
+idx_4_17
+33G  idx_4_17
+821M idx_4_17.xz
 """
 
 """
@@ -68,6 +70,7 @@ time pypy3 kmer-numbering.py 17
  4**17/4  =  4,294,967,296
  4**17/4*8= 34,359,738,368b 33,554,432Kb 32,768Mb 32Gb
  num_regs = 
+ELA 1 day, 2:52:05
 
 time pypy3 kmer-numbering.py 19
  4**19    = 274,877,906,944
@@ -88,17 +91,22 @@ time pypy3 kmer-numbering.py 21
 
 PRINT_EVERY = 100_000
 
-VOCAB = ['A','C','G','T']
+VOCAB = tuple(['A','C','G','T'])
 RCD   = {'A':'T','C':'G','G':'C','T':'A'}
-RC    = [RCD.get(chr(c), None) for c in range(254)]
+RC    = tuple(RCD.get(chr(c), None) for c in range(254))
+print(f"{RCD=}")
+print(f"{RC=}")
 
 
-BACOVD = {     c:i for i,c in enumerate(VOCAB) }
+BACOVD = {c:i for i,c in enumerate(VOCAB) }
 BACOV  = [BACOVD.get(chr(c), None) for c in range(254)]
+print(f"{BACOVD=}")
+print(f"{BACOV=}")
 
 MULTS = tuple(i   for i   in range(32,-2,-2))
 STLUM = tuple(reversed(MULTS))
-#print("MULTS", MULTS)
+print(f"MULTS {MULTS=}")
+print(f"STLUM {STLUM=}")
 
 MATRIX = [None] * 255
 for i,c in enumerate(VOCAB):
@@ -127,6 +135,9 @@ struct_formats = {
 	29: ">Q", # log2(4**29) = 58 8
 	31: ">Q", # log2(4**31) = 62 8
 }
+
+kmer_indexer = None
+
 
 def generate_kmer(length, pos=0, prev=None):
 	if pos == length:
@@ -159,15 +170,16 @@ def generate_sequence(kmer_size, value):
 		#print(f"{value=:02d} {value:>06b} {k=} {mask=:02d} {mask:>06b} {val=:02d} {val:>06b} {nic=:02d} {nic:>06b} {nuc} {nucs}")
 	return "".join(nucs)
 
-@functools.lru_cache(maxsize=1_000_000)
+#@functools.lru_cache(maxsize=1_000_000)
 def index_kmer(seq):
 	lseq     = len(seq)
 	mults    = STLUM[:lseq]
 	muls     = tuple(mults[lseq-i-1] for i in range(lseq))
 
-	values   = (BACOV[c]    for c   in seq)
-	calcs    = (v<<muls[i]  for i,v in enumerate(values))
+	values   = (BACOV[ord(c)]        for c   in seq)
+	calcs    = (v<<muls[i]           for i,v in enumerate(values))
 	calc_sum = sum(calcs)
+
 	#print("  ", seq, values, calcs, calc_sum)
 	return calc_sum
 
@@ -178,6 +190,7 @@ def get_kmer_indexer(lseq):
 	#@functools.lru_cache(maxsize=1_000_000)
 	def kmer_indexer(seq):
 		values   = (BACOV[ord(c)] for c   in seq)
+		#TODO: Use multiplication instead of <<
 		calcs    = (v<<muls[i]    for i,v in enumerate(values))
 		calc_sum = sum(calcs)
 		#print("  ", seq, values, calcs, calc_sum)
@@ -185,17 +198,49 @@ def get_kmer_indexer(lseq):
 
 	return kmer_indexer
 
-kmer_indexer = None
-
 #@functools.lru_cache(maxsize=1_000_000)
+def rev_comp_2(seq, debug=False):
+	fwd      = tuple(seq)
+	rev_comp = tuple(RC[ord(c)] for c in fwd[::-1])
+
+	global kmer_indexer
+	if kmer_indexer is None:
+		kmer_indexer = get_kmer_indexer(len(fwd))
+
+	fwd_idx      = kmer_indexer(fwd)
+	rev_comp_idx = kmer_indexer(rev_comp)
+
+	is_fwd  = None
+	is_comp = None
+	is_fake = False
+	min_seq = None
+	min_idx = None
+
+	if   fwd_idx      <= rev_comp_idx: # fwd
+		is_fwd  = True
+		is_comp = False
+		is_fake = False
+		min_seq = fwd
+		min_idx = fwd_idx
+	elif rev_comp_idx <=  fwd_idx: # rev_comp
+		is_fwd  = False
+		is_comp = True
+		is_fake = False
+		min_seq = rev_comp
+		min_idx = rev_comp_idx
+
+	min_seq = "".join(min_seq)
+
+	if debug: print(f"  FWD      {fwd     =} {fwd_idx     =:5d} {fwd_idx     :>06b} {fwd_idx     :03x} {'*' if     is_fwd and not is_comp else ''}")
+	if debug: print(f"  REV COMP {rev_comp=} {rev_comp_idx=:5d} {rev_comp_idx:>06b} {rev_comp_idx:03x} {'*' if not is_fwd and     is_comp else ''}")
+
+	return min_seq, min_idx, is_fwd, is_comp, is_fake, tuple(sorted(((fwd_idx,fwd), (rev_comp_idx,rev_comp))))
+
 def rev_comp_4(seq, debug=False):
 	fwd      = tuple(seq)
 	fwd_comp = tuple(RC[ord(c)] for c in fwd)
 	rev      = tuple(fwd[::-1])
 	rev_comp = tuple(fwd_comp[::-1])
-
-	#mask         = (2 << ((len(seq)-1)*2))
-	#print(f"  MASK    {mask:5d} {mask:>06b} {mask:03x}")
 
 	global kmer_indexer
 	if kmer_indexer is None:
@@ -244,14 +289,19 @@ def rev_comp_4(seq, debug=False):
 	if debug: print(f"  REV      {rev     =} {rev_idx     =:5d} {rev_idx     :>06b} {rev_idx     :03x} {'*' if not is_fwd and not is_comp else ''}")
 	if debug: print(f"  REV COMP {rev_comp=} {rev_comp_idx=:5d} {rev_comp_idx:>06b} {rev_comp_idx:03x} {'*' if not is_fwd and     is_comp else ''}")
 
-	return min_seq, min_idx, is_fwd, is_comp, is_fake
+	return min_seq, min_idx, is_fwd, is_comp, is_fake, tuple(sorted(((fwd_idx,fwd), (fwd_comp_idx,fwd_comp), (rev_idx,rev), (rev_comp_idx,rev_comp))))
 
 def calc_index_algo(kmer_size, seq, debug=False):
 	debug     = True
 	fwd       = tuple(seq)
-	rec       = tuple(RC[c] for c in fwd[::-1])
-	fwd_idx   = index_kmer(fwd)
-	rec_idx   = index_kmer(rec)
+	rec       = tuple(RC[ord(c)] for c in fwd[::-1])
+
+	global kmer_indexer
+	if kmer_indexer is None:
+		kmer_indexer = get_kmer_indexer(len(fwd))
+
+	fwd_idx   = kmer_indexer(fwd)
+	rec_idx   = kmer_indexer(rec)
 
 	ceq,idx   = (fwd,fwd_idx) if fwd_idx <= rec_idx else (rec,rec_idx)
 	idx_block = idx // 4
@@ -381,8 +431,16 @@ def calc_index_2(seq, idx, kmer_size, debug=False):
 #	return "".join([RC[c] for c in seq[::-1]])
 
 class Kmer:
-	def __init__(self, kmer_size, debug=False):
+	MODE_RC     = 0
+	MODE_RC_REV = 1
+
+class Kmer:
+	MODE_RC     = 0
+	MODE_RC_REV = 1
+
+	def __init__(self, kmer_size, mode=Kmer.MODE_RC, debug=False):
 		self.kmer_size     = kmer_size
+		self.mode          = mode
 		self.debug         = debug
 
 		self.struct_fmt    = struct_formats[self.kmer_size]
@@ -393,10 +451,15 @@ class Kmer:
 
 		print(f"{self.struct_fmt=} {self.struct_size=} {self.struct_max=:15,d}")
 
-		self.index_file = f"idx_{kmer_size:02d}"
-		self.fhd_w = None
-		self.fhd_r = None
+		self.fhd_w    = None
+		self.fhd_r    = None
 		self.num_regs = 0
+
+	@property
+	def index_file(self):
+		mode       = "4" if self.mode == Kmer.MODE_RC_REV else "2"
+		index_file = f"idx_{mode}_{self.kmer_size:02d}"
+		return index_file
 
 	@property
 	def data_pos(self):
@@ -538,12 +601,12 @@ class Kmer:
 	#@functools.lru_cache(maxsize=1_000_000)
 	def find_sequence_id(self, seq):
 		assert self.fhd_r is not None
-		cds, cdx, is_fwd, is_comp, is_fake = rev_comp_4(seq, debug=False)
-		pos, val                           = self.find_register_id(cdx)
-		qes                                = self.generate_sequence(cdx)
+		cds, cdx, is_fwd, is_comp, is_fake, seqs = self.rev_comp(seq)
+		pos, val                                 = self.find_register_id(cdx)
+		qes                                      = self.generate_sequence(cdx)
 		assert val == cdx
 		assert qes == cds
-		if self.debug: print(f"  {cds} {cdx:{int(math.log10(self.struct_max))}d} {cdx:>0{self.struct_size*8}b} {is_fwd=!s:6s} {is_comp=!s:6s} {is_fake=!s:6s} {pos=:{int(math.log10(self.struct_max))}d} {val=:{int(math.log10(self.struct_max))}d}")
+		if self.debug or True: print(f"  {cds=} {cdx=:{int(math.log10(self.struct_max))}d} {cdx:>0{self.struct_size*8}b} {is_fwd=!s:6s} {is_comp=!s:6s} {is_fake=!s:6s} {pos=:{int(math.log10(self.struct_max))}d} {val=:{int(math.log10(self.struct_max))}d}, {seqs}")
 		return pos, val
 
 	#@functools.lru_cache(maxsize=1_000_000)
@@ -551,6 +614,15 @@ class Kmer:
 		return generate_sequence(self.kmer_size, value)
 
 	#@functools.lru_cache(maxsize=1_000_000)
+	def rev_comp(self, seq):
+		if   self.mode == Kmer.MODE_RC:
+			return self.rev_comp_2(seq)
+		elif self.mode == Kmer.MODE_RC_REV:
+			return self.rev_comp_4(seq)
+
+	def rev_comp_2(self, seq):
+		return rev_comp_2(seq, debug=self.debug)
+
 	def rev_comp_4(self, seq):
 		return rev_comp_4(seq, debug=self.debug)
 
@@ -577,22 +649,22 @@ class Eta:
 		self.delta_t_last  = self.now - self._last_t
 
 		if value < self._last_v:
-			self.diff_v_last = -1
-			self.speed_last  = -1
+			self.diff_v_last  = -1
+			self.speed_last   = -1
 		else:
-			ela_last         = self.delta_t_last.total_seconds()
-			self.diff_v_last = value - self._last_v
-			self.speed_last  = self.diff_v_last / ela_last
+			ela_last          = self.delta_t_last.total_seconds()
+			self.diff_v_last  = value - self._last_v
+			self.speed_last   = self.diff_v_last / ela_last
 
 
 		if   self._total == -1:
-			self.eta_v = -1
-			self.eta_t = -1
+			self.eta_v        = -1
+			self.eta_t        = -1
 		else:
-			ela_start          = self.delta_t_start.total_seconds()
-			self.diff_v_start  = value
-			self.speed_start   = self.diff_v_start / ela_start
-			self.eta_v         = self._total - value
+			ela_start         = self.delta_t_start.total_seconds()
+			self.diff_v_start = value
+			self.speed_start  = self.diff_v_start / ela_start
+			self.eta_v        = self._total - value
 
 			if self.speed_start == 0:
 				self.eta_t = -1
@@ -612,8 +684,8 @@ class Eta:
 
 def create2(kmer, debug=False):
 	for i, seq in enumerate(generate_kmer(kmer.kmer_size)):
-		#calc_index_algo_idx(kmer_size, i, debug=debug)
 		calc_index_algo(kmer.kmer_size, seq, debug=debug)
+		#calc_index_algo_idx(kmer_size, i, debug=debug)
 
 def create(kmer, debug=False):
 	print("creating")
@@ -639,8 +711,8 @@ def create(kmer, debug=False):
 				if debug: print(f"SEQ {i=:5d} {seq=} {ind=:5d} {ind:>06b} {inv=!s:6s} {qes=} {dni=:5d} {dni:>06b} {qes if inv else seq} {idx=:5d} {idx:>06b} {idx:03x} {cdx=:5d} {cdx:>06b} {cdx:03x} {'*' if inv else ''}")
 		else:
 			if debug: print(f"SEQ {i=:5d} {seq=}")
-			cds, cdx, is_fwd, is_comp, is_fake = kmer.rev_comp_4(seq)
-			if debug: print(f"  {cds} {cdx:5d} {cdx:>06b} {cdx:03x} {is_fwd=!s:6s} {is_comp=!s:6s} {is_fake=!s:6s}")
+			cds, cdx, is_fwd, is_comp, is_fake, seqs = kmer.rev_comp(seq)
+			if debug: print(f"  {cds} {cdx:5d} {cdx:>06b} {cdx:03x} {is_fwd=!s:6s} {is_comp=!s:6s} {is_fake=!s:6s} {seqs}")
 
 		if kmer_size<7:
 			ids[cdx] = ids.get(cdx, []) + [i]
@@ -675,7 +747,10 @@ def check(kmer, num_regs=None, debug=False):
 		if i % (PRINT_EVERY if (4**kmer_size) > PRINT_EVERY else 1) == 0:
 			print(f" {i=:15,d} / {4**kmer_size:15,d}")
 		pos, val = kmer.find_sequence_id(seq)
+		print(f"  {pos=} {val=}")
 		#calc_index_algo(kmer.kmer_size, seq, debug=debug)
+		idx      = calc_index_algo_idx(kmer.kmer_size, val, debug=debug)
+		assert pos == idx, f"{i=} {seq=} {pos=} {val=} == {idx=}"
 		#cds, cdx, is_fwd, is_comp, is_fake = kmer.rev_comp_4(seq)
 		#qes                                = kmer.generate_sequence(cdx)
 		#if debug or kmer_size<7: print(f"{i=} {seq=} {pos=} {val=} {cds=} {cdx=} {qes=}")
@@ -685,9 +760,7 @@ def check(kmer, num_regs=None, debug=False):
 	kmer.close_r()
 
 def main(kmer_size, debug=False):
-	kmer = Kmer(kmer_size=kmer_size, debug=kmer_size<7 or debug)
-
-	num_regs = None
+	kmer = Kmer(kmer_size=kmer_size, mode=Kmer.MODE_RC, debug=kmer_size<7 or debug)
 
 	#create2(kmer, debug=debug)
 	#sys.exit(0)
@@ -699,7 +772,7 @@ def main(kmer_size, debug=False):
 
 
 	if kmer_size < 15:
-		#check(kmer, num_regs=num_regs, debug=debug)
+		check(kmer, num_regs=None, debug=debug)
 		pass
 	else:
 		print("too large. not checking")
